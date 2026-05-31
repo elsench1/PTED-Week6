@@ -1,0 +1,253 @@
+---
+title: "Exercise 6"
+format: html
+---
+
+## Preparation
+
+```{r}
+library("readr")
+library("sf")
+library(dplyr)
+library(ggplot2)
+library(tmap)
+library(terra)
+library(lubridate)
+
+wildschwein_BE <- read_delim("Data/wildschwein_BE_2056.csv") |> 
+  st_as_sf(coords = c("E", "N"), crs = 2056, remove = FALSE)
+```
+
+## Task 1 
+
+```{r}
+Feldaufnahmen_Fanel <- read_sf("Data/Feldaufnahmen_Fanel.gpkg")
+
+str(Feldaufnahmen_Fanel)
+
+names(Feldaufnahmen_Fanel)
+glimpse(Feldaufnahmen_Fanel)
+head(Feldaufnahmen_Fanel)
+st_geometry_type(Feldaufnahmen_Fanel)
+unique(st_geometry_type(Feldaufnahmen_Fanel))
+sapply(Feldaufnahmen_Fanel, class)
+st_crs(Feldaufnahmen_Fanel)
+
+
+ggplot() +
+  geom_sf(data = Feldaufnahmen_Fanel, aes(fill = Frucht)) +
+  theme_minimal()
+
+tmap_options(basemap.server = 
+               "SwissFederalGeoportal.NationalMapColor"  
+               )
+
+tmap_mode("view")
+
+tm_shape(Feldaufnahmen_Fanel) + tm_polygons("Frucht")
+
+```
+
+The dataset `Feldaufnahmen_Fanel` was loaded as a simple feature object. It contains **975 features** and **three columns**: `FieldID`, `Frucht`, and `geom`.
+
+The column `FieldID` is numeric and identifies the field. The column `Frucht` is a character column and describes the crop or land-use type, for example **Roggen**, **Wiese**, **Weide**, or **Wald**. Some entries in this column contain missing values.
+
+The geometry column `geom` stores the spatial information. The geometry type of the dataset is **POLYGON**, which means that the data represents areas rather than points or lines.
+
+The coordinate reference system is **CH1903+ / LV95**, corresponding to **EPSG:2056**. This is a projected coordinate reference system used in Switzerland, with coordinates measured in metres.
+
+
+## Task 2
+
+```{r}
+
+wildschwein_BE <- wildschwein_BE |> 
+  filter(
+    DatetimeUTC >= "2015-05-01 00:00:00",
+    DatetimeUTC <= "2015-06-30 23:59:59"
+  )
+
+
+ggplot() +
+  geom_sf(data = Feldaufnahmen_Fanel, aes(fill = Frucht), alpha = 0.5) +
+  geom_sf(data = wildschwein_BE, size = 0.3) +
+  theme_minimal()
+
+
+wildschwein_BE_annotated <- st_join(
+  wildschwein_BE,
+  Feldaufnahmen_Fanel
+)
+
+glimpse(wildschwein_BE_annotated)
+
+visited_fruits <- wildschwein_BE_annotated |> 
+  count(Frucht, sort = TRUE)
+
+
+wildschwein_eat_fruits <- wildschwein_BE_annotated |> 
+  count(TierName, Frucht, sort = TRUE)
+
+visited_fruits
+wildschwein_eat_fruits
+```
+
+
+## Task 3 
+
+```{r}
+library(lubridate)
+library(forcats)
+
+wildschwein_BE_annotated <- wildschwein_BE_annotated |>
+  mutate(
+    DatetimeUTC = ymd_hms(DatetimeUTC),
+    hour = hour(DatetimeUTC),
+    Frucht = if_else(is.na(Frucht), "No field / unknown", Frucht)
+  )
+
+crop_hour_counts <- wildschwein_BE_annotated |>
+  st_drop_geometry() |>
+  count(hour, Frucht, name = "n")
+
+
+most_common_fruits <- wildschwein_BE_annotated |>
+  st_drop_geometry() |>
+  count(Frucht, sort = TRUE) |>
+  slice_head(n = 5) |>
+  pull(Frucht)
+
+crop_hour_percent <- crop_hour_counts |>
+  filter(Frucht %in% most_common_fruits) |>
+  group_by(hour) |>
+  mutate(percent = n / sum(n) * 100) |>
+  ungroup()
+
+
+ggplot(crop_hour_percent, aes(x = hour, y = percent, fill = Frucht)) +
+  geom_col(position = "stack") +
+  scale_x_continuous(breaks = 0:23) +
+  labs(
+    title = "Percentage of wild boar samples per crop type and hour",
+    x = "Hour of day",
+    y = "Percentage of samples",
+    fill = "Crop / land-use type"
+  ) +
+  theme_minimal()
+
+
+crop_hour_animal <- wildschwein_BE_annotated |>
+  st_drop_geometry() |>
+  filter(Frucht %in% most_common_fruits) |>
+  count(TierName, hour, Frucht, name = "n") |>
+  group_by(TierName, hour) |>
+  mutate(percent = n / sum(n) * 100) |>
+  ungroup()
+
+ggplot(crop_hour_animal, aes(x = hour, y = percent, fill = Frucht)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ TierName) +
+  scale_x_continuous(breaks = seq(0, 23, by = 4)) +
+  labs(
+    title = "Crop use by hour and individual wild boar",
+    x = "Hour of day",
+    y = "Percentage of samples",
+    fill = "Crop / land-use type"
+  ) +
+  theme_minimal()
+```
+
+
+
+## Task 4
+
+```{r}
+vegetationshoehe_LFI <- rast("Data/vegetationshoehe_LFI.tif")
+
+vegetationshoehe_LFI
+crs(vegetationshoehe_LFI)
+res(vegetationshoehe_LFI)
+ext(vegetationshoehe_LFI)
+nlyr(vegetationshoehe_LFI)
+
+plot(vegetationshoehe_LFI)
+
+tmap_options_reset()
+
+tmap_mode("plot")
+
+tm_shape(vegetationshoehe_LFI) +
+  tm_raster(
+    title = "Vegetation height"
+  )
+
+tm_shape(vegetationshoehe_LFI) +
+  tm_raster(
+    title = "Vegetation height"
+  ) +
+  tm_shape(wildschwein_BE) +
+  tm_dots(size = 0.02)
+```
+
+## Task 5
+
+```{r}
+
+vegetation_values <- terra::extract(
+  vegetationshoehe_LFI,
+  terra::vect(wildschwein_BE)
+)
+
+head(vegetation_values)
+
+
+wildschwein_BE_veg <- wildschwein_BE |>
+  mutate(
+    vegetationshoehe_LFI = vegetation_values[[2]]
+  ) |>
+  select(TierID, TierName, DatetimeUTC, vegetationshoehe_LFI, geometry)
+
+wildschwein_BE_veg
+
+
+summary(wildschwein_BE_veg$vegetationshoehe_LFI)
+
+wildschwein_BE_veg |>
+  st_drop_geometry() |>
+  group_by(TierName) |>
+  summarise(
+    n = n(),
+    mean_vegetation_height = mean(vegetationshoehe_LFI, na.rm = TRUE),
+    median_vegetation_height = median(vegetationshoehe_LFI, na.rm = TRUE),
+    min_vegetation_height = min(vegetationshoehe_LFI, na.rm = TRUE),
+    max_vegetation_height = max(vegetationshoehe_LFI, na.rm = TRUE)
+  )
+
+
+wildschwein_BE_veg <- wildschwein_BE_veg |>
+  mutate(
+    DatetimeUTC = ymd_hms(DatetimeUTC),
+    hour = hour(DatetimeUTC)
+  )
+
+
+ggplot(wildschwein_BE_veg, aes(x = hour, y = vegetationshoehe_LFI)) +
+  geom_boxplot(aes(group = hour)) +
+  scale_x_continuous(breaks = 0:23) +
+  labs(
+    title = "Vegetation height at wild boar locations by hour",
+    x = "Hour of day",
+    y = "Vegetation height"
+  ) +
+  theme_minimal()
+
+
+ggplot(wildschwein_BE_veg, aes(x = TierName, y = vegetationshoehe_LFI)) +
+  geom_boxplot() +
+  labs(
+    title = "Vegetation height at wild boar locations by individual",
+    x = "Wild boar",
+    y = "Vegetation height"
+  ) +
+  theme_minimal()
+```
