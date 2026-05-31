@@ -1,6 +1,12 @@
 ---
 title: "Exercise 6"
-format: html
+
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    warning: false
+    message: false
 output-file: index.html
 ---
 
