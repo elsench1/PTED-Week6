@@ -2,3 +2,5 @@
 .gpkg
 .tif
 .csv
+/.quarto/
+**/*.quarto_ipynb
